@@ -2,8 +2,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const getAiClient = (apiKey?: string) => new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || "" });
 
-const PRO_MODEL = "gemini-3.1-pro-preview";
-const FLASH_MODEL = "gemini-3-flash-preview";
+const DEFAULT_PRO_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_FLASH_MODEL = "gemini-3-flash-preview";
 
 /**
  * Utility to parse JSON from AI response, handling markdown blocks if present.
@@ -22,7 +22,7 @@ function parseJsonResponse(text: string) {
  * Node 0: Market Context Researcher
  * Automatically generates Audience, Persona, and Selling Points based on Product + Keywords.
  */
-export async function researchMarketContext(seedKeyword: string, product: string, apiKey?: string) {
+export async function researchMarketContext(seedKeyword: string, product: string, apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are a Strategic Market Analyst. 
@@ -43,7 +43,7 @@ export async function researchMarketContext(seedKeyword: string, product: string
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -61,7 +61,7 @@ export async function researchMarketContext(seedKeyword: string, product: string
 
   return parseJsonResponse(response.text);
 }
-export async function expandKeywords(seedKeyword: string, product: string, apiKey?: string) {
+export async function expandKeywords(seedKeyword: string, product: string, apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are an SEO Strategist. 
@@ -89,7 +89,7 @@ export async function expandKeywords(seedKeyword: string, product: string, apiKe
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -123,7 +123,7 @@ export async function expandKeywords(seedKeyword: string, product: string, apiKe
 /**
  * Node 2: Market & Competitor Research (Dissector)
  */
-export async function researchCompetitors(topic: string, product: string, apiKey?: string) {
+export async function researchCompetitors(topic: string, product: string, apiKey?: string, model: string = DEFAULT_PRO_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are a Market Researcher & Competitive Dissector.
@@ -160,7 +160,7 @@ export async function researchCompetitors(topic: string, product: string, apiKey
   `;
 
   const response = await ai.models.generateContent({
-    model: PRO_MODEL,
+    model: model,
     contents: prompt,
     config: {
       tools: [{ googleSearch: {} }],
@@ -211,7 +211,7 @@ export async function researchCompetitors(topic: string, product: string, apiKey
 /**
  * Node 3: Core Proposition + Node 4: GEO-Optimized Deep Outline
  */
-export async function architectOutline(topic: string, research: any, product: string, commonStructure?: string, documentStandards?: string, apiKey?: string) {
+export async function architectOutline(topic: string, research: any, product: string, commonStructure?: string, documentStandards?: string, apiKey?: string, model: string = DEFAULT_PRO_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     Generate a deep SEO/GEO outline for: "${topic}"
@@ -251,7 +251,7 @@ export async function architectOutline(topic: string, research: any, product: st
   `;
 
   const response = await ai.models.generateContent({
-    model: PRO_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -261,9 +261,9 @@ export async function architectOutline(topic: string, research: any, product: st
           title: { type: Type.STRING },
           h1: { type: Type.STRING },
           coreProposition: { type: Type.STRING },
-          sections: { 
-            type: Type.ARRAY, 
-            items: { 
+          sections: {
+            type: Type.ARRAY,
+            items: {
               type: Type.OBJECT,
               properties: {
                 title: { type: Type.STRING },
@@ -271,7 +271,7 @@ export async function architectOutline(topic: string, research: any, product: st
                 subsections: { type: Type.ARRAY, items: { type: Type.STRING } }
               },
               required: ["title", "infoGain"]
-            } 
+            }
           },
           lsi: { type: Type.ARRAY, items: { type: Type.STRING } },
           anchorLinks: {
@@ -318,7 +318,8 @@ export async function writeSegment(
   subsections?: string[],
   contentStandard?: string,
   documentStandards?: string,
-  apiKey?: string
+  apiKey?: string,
+  model: string = DEFAULT_PRO_MODEL
 ) {
   const ai = getAiClient(apiKey);
   const prompt = `
@@ -350,7 +351,7 @@ export async function writeSegment(
   `;
 
   const response = await ai.models.generateContent({
-    model: PRO_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -377,7 +378,7 @@ export async function writeSegment(
 /**
  * Node 6: Polish & AIO Connector
  */
-export async function polishAndAIO(content: string, anchorLinks: { keyword: string; url: string }[], apiKey?: string) {
+export async function polishAndAIO(content: string, anchorLinks: { keyword: string; url: string }[], apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are an Editor & AIO Specialist for HitPaw.
@@ -405,7 +406,7 @@ export async function polishAndAIO(content: string, anchorLinks: { keyword: stri
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -439,7 +440,7 @@ export async function polishAndAIO(content: string, anchorLinks: { keyword: stri
 /**
  * Node 7: QA Node (Micro-Surgery)
  */
-export async function qaReview(content: string, sectionTitle: string, apiKey?: string) {
+export async function qaReview(content: string, sectionTitle: string, apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are a Content Auditor. 
@@ -461,7 +462,7 @@ export async function qaReview(content: string, sectionTitle: string, apiKey?: s
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -483,7 +484,7 @@ export async function qaReview(content: string, sectionTitle: string, apiKey?: s
 /**
  * Node 7b: Editor Micro-Surgery
  */
-export async function editorMicrosurgery(content: string, feedback: string, apiKey?: string) {
+export async function editorMicrosurgery(content: string, feedback: string, apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are an Editor performing "Micro-Surgery". 
@@ -496,7 +497,7 @@ export async function editorMicrosurgery(content: string, feedback: string, apiK
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt
   });
 
@@ -507,7 +508,7 @@ export async function editorMicrosurgery(content: string, feedback: string, apiK
  * Node 8: Final Article Auditor
  * Evaluates against On-Page, EEAT, and GEO standards.
  */
-export async function auditArticle(content: string, standards?: string, apiKey?: string) {
+export async function auditArticle(content: string, standards?: string, apiKey?: string, model: string = DEFAULT_FLASH_MODEL) {
   const ai = getAiClient(apiKey);
   const prompt = `
     You are a Content Quality Auditor. 
@@ -531,7 +532,7 @@ export async function auditArticle(content: string, standards?: string, apiKey?:
   `;
 
   const response = await ai.models.generateContent({
-    model: FLASH_MODEL,
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: "application/json",

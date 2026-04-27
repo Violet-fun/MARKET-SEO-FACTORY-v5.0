@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Search, 
-  Layout, 
-  PenTool, 
-  CheckCircle2, 
-  Loader2, 
-  ChevronRight, 
-  FileText, 
-  Target, 
-  Users, 
-  Zap, 
+import {
+  Search,
+  Layout,
+  PenTool,
+  CheckCircle2,
+  Loader2,
+  ChevronRight,
+  FileText,
+  Target,
+  Users,
+  Zap,
   AlertCircle,
   Copy,
   Download,
@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GenerationState, Article, ArticleSection, WorkflowMode } from './types';
-import { 
+import {
   expandKeywords,
   researchCompetitors,
   architectOutline,
@@ -39,7 +39,8 @@ import {
   editorMicrosurgery,
   researchMarketContext,
   auditArticle
-} from './services/geminiService';
+} from './services/aiService';
+import { AIProvider } from './types';
 import { withRetry, delay } from './lib/utils';
 import mammoth from 'mammoth';
 
@@ -57,6 +58,8 @@ export default function App() {
     commonStructure: '',
     contentStandard: '',
     documentStandards: '',
+    provider: 'Gemini',
+    model: 'gemini-3.1-flash-lite-preview',
     error: null,
   });
 
@@ -75,7 +78,7 @@ export default function App() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (file.name.endsWith('.docx')) {
       const reader = new FileReader();
       reader.onload = async (event) => {
@@ -105,7 +108,7 @@ export default function App() {
     setState(prev => ({ ...prev, step: 'expanding', error: null, expandedTerms: [] }));
 
     try {
-      const clusters = await withRetry(() => expandKeywords(state.seedKeyword, state.productToPromote, customApiKey), handleRetryFeedback);
+      const clusters = await withRetry(() => expandKeywords(state.seedKeyword, state.productToPromote, customApiKey, state.provider, state.model), handleRetryFeedback);
       setState(prev => ({ ...prev, expandedTerms: clusters, step: 'completed', error: null }));
     } catch (err: any) {
       console.error(err);
@@ -119,11 +122,11 @@ export default function App() {
     if (!state.seedKeyword) return;
     setIsGenerating(true);
     const keywordsList = state.seedKeyword.split('\n').map(k => k.trim()).filter(k => k);
-    
+
     setState(prev => ({ ...prev, step: 'context', error: null }));
 
     try {
-      const context = await withRetry(() => researchMarketContext(keywordsList[0], state.productToPromote, customApiKey), handleRetryFeedback);
+      const context = await withRetry(() => researchMarketContext(keywordsList[0], state.productToPromote, customApiKey, state.provider, state.model), handleRetryFeedback);
       setState(prev => ({
         ...prev,
         audience: context.audience,
@@ -165,12 +168,12 @@ export default function App() {
           articles: prev.articles.map(a => a.id === artId ? { ...a, status: 'researching' } : a)
         }));
 
-        const research = await withRetry(() => researchCompetitors(article.title, state.productToPromote, customApiKey), handleRetryFeedback);
-        
+        const research = await withRetry(() => researchCompetitors(article.title, state.productToPromote, customApiKey, state.provider, state.model), handleRetryFeedback);
+
         setState(prev => ({
           ...prev,
-          articles: prev.articles.map(a => a.id === artId ? { 
-            ...a, 
+          articles: prev.articles.map(a => a.id === artId ? {
+            ...a,
             status: state.mode === 'Template' ? 'awaiting_research_approval' : 'outlining', // Workflow C waits, B moves to outline
             competitiveResearch: research,
             contentType: research.contentType
@@ -188,26 +191,28 @@ export default function App() {
       if (article.status === 'outlining') {
         const research = article.competitiveResearch!;
         const outline = await withRetry(() => architectOutline(
-          article.title, 
-          research, 
-          state.productToPromote, 
-          state.mode === 'Template' ? state.commonStructure : undefined,
+          article.title,
+          research,
+          state.productToPromote,
+          state.commonStructure,
           state.documentStandards,
-          customApiKey
+          customApiKey,
+          state.provider,
+          state.model
         ), handleRetryFeedback);
 
         setState(prev => ({
           ...prev,
-          articles: prev.articles.map(a => a.id === artId ? { 
-            ...a, 
-            status: state.mode === 'Template' ? 'awaiting_outline_approval' : 'writing', 
+          articles: prev.articles.map(a => a.id === artId ? {
+            ...a,
+            status: state.mode === 'Template' ? 'awaiting_outline_approval' : 'writing',
             outline,
             h1: outline.h1,
             coreProposition: outline.coreProposition,
             faq: outline.faq,
-            sections: outline.sections.map((s: { title: string; infoGain: string; subsections?: string[] }) => ({ 
-              title: s.title, 
-              content: '', 
+            sections: outline.sections.map((s: { title: string; infoGain: string; subsections?: string[] }) => ({
+              title: s.title,
+              content: '',
               isGenerating: false,
               infoGain: s.infoGain,
               subsections: s.subsections
@@ -230,7 +235,7 @@ export default function App() {
 
           const section = article.sections[j];
           const sectionTitle = section.title;
-          
+
           setState(prev => ({
             ...prev,
             articles: prev.articles.map(a => a.id === artId ? {
@@ -250,13 +255,15 @@ export default function App() {
             section.subsections,
             state.mode === 'Template' ? state.contentStandard : undefined,
             state.documentStandards,
-            customApiKey
+            customApiKey,
+            state.provider,
+            state.model
           ), handleRetryFeedback);
 
-          let qa = await withRetry(() => qaReview(segmentRes.content, sectionTitle, customApiKey), handleRetryFeedback);
-          
+          let qa = await withRetry(() => qaReview(segmentRes.content, sectionTitle, customApiKey, state.provider, state.model), handleRetryFeedback);
+
           if (!qa.pass) {
-            segmentRes.content = await withRetry(() => editorMicrosurgery(segmentRes.content, qa.feedback, customApiKey), handleRetryFeedback);
+            segmentRes.content = await withRetry(() => editorMicrosurgery(segmentRes.content, qa.feedback, customApiKey, state.provider, state.model), handleRetryFeedback);
           }
 
           accumulatedContent += `## ${sectionTitle}\n\n${segmentRes.content}\n\n`;
@@ -265,10 +272,10 @@ export default function App() {
             ...prev,
             articles: prev.articles.map(a => a.id === artId ? {
               ...a,
-              sections: a.sections.map((s, idx) => idx === j ? { 
-                ...s, 
-                content: segmentRes.content, 
-                isGenerating: false, 
+              sections: a.sections.map((s, idx) => idx === j ? {
+                ...s,
+                content: segmentRes.content,
+                isGenerating: false,
                 imageSuggestion: segmentRes.imageSuggestion,
                 qaFeedback: qa.pass ? '' : qa.feedback
               } : s)
@@ -278,16 +285,20 @@ export default function App() {
 
         // Final Polishing
         const polished = await withRetry(() => polishAndAIO(
-          accumulatedContent, 
+          accumulatedContent,
           outline.anchorLinks,
-          customApiKey
+          customApiKey,
+          state.provider,
+          state.model
         ), handleRetryFeedback);
 
         // Final Audit
         const audit = await withRetry(() => auditArticle(
           polished.polishedContent,
           state.documentStandards,
-          customApiKey
+          customApiKey,
+          state.provider,
+          state.model
         ), handleRetryFeedback);
 
         setState(prev => ({
@@ -355,10 +366,10 @@ export default function App() {
   const handleRegenerateArticle = (id: string) => {
     setState(prev => ({
       ...prev,
-      articles: prev.articles.map(a => a.id === id ? { 
-        ...a, 
-        status: 'pending', 
-        sections: [], 
+      articles: prev.articles.map(a => a.id === id ? {
+        ...a,
+        status: 'pending',
+        sections: [],
         finalContent: '',
         outline: undefined,
         competitiveResearch: undefined
@@ -382,11 +393,11 @@ export default function App() {
 
   useEffect(() => {
     if (state.mode === 'Brain') return;
-    
+
     // Safety lock: if we are already actively processing something in this turn, skip
     if (processingRef.current) return;
 
-    const nextArticle = state.articles.find(a => 
+    const nextArticle = state.articles.find(a =>
       (a.status === 'pending' || a.status === 'researching' || a.status === 'outlining' || a.status === 'writing') && !a.isPaused
     );
 
@@ -407,7 +418,7 @@ export default function App() {
   const downloadCSV = () => {
     if (state.expandedTerms.length === 0) return;
     const headers = ["Target Keyword", "Intent", "Keywords Group", "Article Type", "Internal Link Recommendation"].join(",");
-    const rows = state.expandedTerms.map(t => 
+    const rows = state.expandedTerms.map(t =>
       `"${t.mainTitle}","${t.intent}","${t.keywords.join('|')}","General Article","/"`
     ).join("\n");
     const blob = new Blob([`${headers}\n${rows}`], { type: 'text/csv;charset=utf-8;' });
@@ -433,24 +444,24 @@ export default function App() {
           </div>
           <div className="font-bold text-lg tracking-tight">MARKET SEO FACTORY v5.0</div>
         </div>
-        
+
         {/* Pipeline Tab Switcher */}
         <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button 
+          <button
             onClick={() => setState(prev => ({ ...prev, mode: 'Brain', articles: [], expandedTerms: [], step: 'idle' }))}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${state.mode === 'Brain' ? 'bg-white text-primary shadow-sm' : 'text-text-sub hover:text-text-main'}`}
           >
             <BrainCircuit className="w-4 h-4" />
             Workflow A (规划大脑)
           </button>
-          <button 
+          <button
             onClick={() => setState(prev => ({ ...prev, mode: 'Factory', articles: [], expandedTerms: [], step: 'idle' }))}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${state.mode === 'Factory' ? 'bg-white text-primary shadow-sm' : 'text-text-sub hover:text-text-main'}`}
           >
             <Factory className="w-4 h-4" />
             Workflow B (内容工厂)
           </button>
-          <button 
+          <button
             onClick={() => setState(prev => ({ ...prev, mode: 'Template', articles: [], expandedTerms: [], step: 'idle' }))}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${state.mode === 'Template' ? 'bg-white text-primary shadow-sm' : 'text-text-sub hover:text-text-main'}`}
           >
@@ -476,20 +487,67 @@ export default function App() {
           <div className="content-area custom-scrollbar">
             <form onSubmit={handleStart} className="space-y-5">
               <div className="space-y-2">
-                <label className="block text-xs font-bold text-text-main uppercase tracking-wider">Gemini API Key</label>
-                <input 
-                  type="password" 
-                  placeholder="粘贴您的 API Key"
+                <label className="block text-xs font-bold text-text-main uppercase tracking-wider">AI API Key</label>
+                <input
+                  type="password"
+                  placeholder={`粘贴您的 ${state.provider === 'Gemini' ? 'Gemini' : 'OpenAI'} API Key`}
                   className="input-field"
                   value={customApiKey}
                   onChange={e => setCustomApiKey(e.target.value)}
                 />
               </div>
 
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-2">
+                  <label className="block text-xs font-bold text-text-main uppercase tracking-wider">Provider</label>
+                  <select
+                    className="input-field"
+                    value={state.provider}
+                    onChange={e => {
+                      const p = e.target.value as AIProvider;
+                      setState(prev => ({
+                        ...prev,
+                        provider: p,
+                        model: p === 'Gemini' ? 'gemini-3.1-flash-lite-preview' : 'gpt-5.4'
+                      }));
+                    }}
+                  >
+                    <option value="Gemini">Gemini</option>
+                    <option value="OpenAI">OpenAI</option>
+                  </select>
+                </div>
+                <div className="flex-1 space-y-2">
+                  <label className="block text-xs font-bold text-text-main uppercase tracking-wider">Model</label>
+                  <select
+                    className="input-field"
+                    value={state.model}
+                    onChange={e => setState(prev => ({ ...prev, model: e.target.value }))}
+                  >
+                    {state.provider === 'Gemini' ? (
+                      <>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-flash-lite-latest">Gemini Flash Lite Latest</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                        <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Lite</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="gpt-5.5">GPT-5.5</option>
+                        <option value="gpt-5.4">GPT-5.4</option>
+                        <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                        <option value="gpt-5.4-nano">GPT-5.4 Nano</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-text-main uppercase tracking-wider">推广产品信息 (Core Feature)</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="e.g. Kling AI - 高清视频生成器"
                   className="input-field"
                   value={state.productToPromote}
@@ -503,9 +561,9 @@ export default function App() {
                   {state.mode === 'Template' && (
                     <div className="space-y-1">
                       <label className="block text-xs font-bold text-text-main uppercase tracking-wider flex items-center gap-2">
-                         <Layout className="w-3 h-3 text-primary" /> 通用文章结构
+                        <Layout className="w-3 h-3 text-primary" /> 通用文章结构
                       </label>
-                      <textarea 
+                      <textarea
                         placeholder="例如: 1. 简介, 2. 功能特点, 3. 操作步骤..."
                         className="input-field h-24 text-[10px] p-2 leading-relaxed"
                         value={state.commonStructure}
@@ -515,9 +573,9 @@ export default function App() {
                   )}
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-text-main uppercase tracking-wider flex items-center gap-2">
-                       <PenTool className="w-3 h-3 text-primary" /> 内容产出标准
+                      <PenTool className="w-3 h-3 text-primary" /> 内容产出标准
                     </label>
-                    <textarea 
+                    <textarea
                       placeholder="例如: 字数需大于1000, 插入产品下载链接..."
                       className="input-field h-24 text-[10px] p-2 leading-relaxed"
                       value={state.contentStandard}
@@ -532,15 +590,15 @@ export default function App() {
                       <label className="cursor-pointer group flex items-center gap-1.5 px-2 py-0.5 rounded border border-primary/20 hover:bg-primary/5 transition-colors">
                         <Upload className="w-3 h-3 text-primary" />
                         <span className="text-[10px] font-bold text-primary">上传文件</span>
-                        <input 
-                          type="file" 
-                          className="hidden" 
-                          accept=".txt,.md,.docx" 
-                          onChange={handleFileUpload} 
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".txt,.md,.docx"
+                          onChange={handleFileUpload}
                         />
                       </label>
                     </div>
-                    <textarea 
+                    <textarea
                       placeholder="粘贴您的文档型文章标准, AI 将学习其风格、术语和特定偏好..."
                       className="input-field h-32 text-[10px] p-2 leading-relaxed border-primary/20 bg-primary/5 focus:bg-white"
                       value={state.documentStandards}
@@ -556,7 +614,7 @@ export default function App() {
                     {state.mode === 'Brain' ? '核心种子词' : '批量关键词列表 (每行一个)'}
                   </label>
                 </div>
-                <textarea 
+                <textarea
                   placeholder={state.mode === 'Brain' ? "输入核心产品词进行全自动化规划..." : "粘贴 Workflow A 生成的关键词列表，每行一个..."}
                   className="input-field h-32 font-mono text-[11px] leading-relaxed resize-none p-3"
                   value={state.seedKeyword}
@@ -572,7 +630,7 @@ export default function App() {
                 </div>
               )}
 
-              <button 
+              <button
                 type="submit"
                 disabled={isGenerating || !state.seedKeyword}
                 className="btn-primary w-full flex items-center justify-center gap-2 mt-4 shadow-lg shadow-primary/20"
@@ -623,11 +681,10 @@ export default function App() {
                         {idx !== 7 && (
                           <div className={`absolute left-[7px] top-4 w-0.5 h-6 ${isCompleted ? 'bg-primary' : 'bg-gray-200'}`} />
                         )}
-                        <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 z-10 transition-all ${
-                          isCompleted ? 'bg-primary text-white scale-110 shadow-sm' : 
-                          isActive ? 'bg-white border-2 border-primary text-primary animate-pulse' : 
-                          'bg-gray-200 text-transparent'
-                        }`}>
+                        <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 z-10 transition-all ${isCompleted ? 'bg-primary text-white scale-110 shadow-sm' :
+                          isActive ? 'bg-white border-2 border-primary text-primary animate-pulse' :
+                            'bg-gray-200 text-transparent'
+                          }`}>
                           {isCompleted ? <Check className="w-2.5 h-2.5" /> : <div className="w-1 h-1 rounded-full bg-current" />}
                         </div>
                         <div className="flex-1 -mt-0.5">
@@ -652,7 +709,7 @@ export default function App() {
                     排产流水线 ({state.articles.length})
                   </label>
                   {state.articles.some(a => a.status === 'completed') && (
-                    <button 
+                    <button
                       onClick={() => {
                         const completed = state.articles.filter(a => a.status === 'completed');
                         completed.forEach(art => {
@@ -671,7 +728,7 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                
+
                 <div className="space-y-3">
                   {state.articles.map((art) => {
                     const stages = ['Context', 'Expanding', 'Researching', 'Planning', 'Outlining', 'Writing', 'Polishing', 'QA'];
@@ -698,54 +755,52 @@ export default function App() {
                           tabIndex={0}
                           onClick={() => setSelectedArticleId(art.id)}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedArticleId(art.id); } }}
-                          className={`w-full text-left p-3 rounded-xl border cursor-pointer transition-all flex flex-col gap-2 ${
-                            selectedArticleId === art.id 
-                              ? 'border-primary bg-blue-50/50 ring-1 ring-primary/10' 
-                              : 'border-border bg-white hover:border-primary/30'
-                          }`}
+                          className={`w-full text-left p-3 rounded-xl border cursor-pointer transition-all flex flex-col gap-2 ${selectedArticleId === art.id
+                            ? 'border-primary bg-blue-50/50 ring-1 ring-primary/10'
+                            : 'border-border bg-white hover:border-primary/30'
+                            }`}
                         >
                           <div className="flex items-center gap-3">
-                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                              art.status === 'completed' ? 'bg-accent-success' : 
+                            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${art.status === 'completed' ? 'bg-accent-success' :
                               art.status === 'error' ? 'bg-red-500' :
-                              art.status.includes('awaiting') ? 'bg-amber-500 animate-pulse' :
-                              art.status === 'pending' || art.isPaused ? 'bg-gray-300' : 'bg-primary animate-pulse'
-                            }`} />
+                                art.status.includes('awaiting') ? 'bg-amber-500 animate-pulse' :
+                                  art.status === 'pending' || art.isPaused ? 'bg-gray-300' : 'bg-primary animate-pulse'
+                              }`} />
                             <div className="flex-1 min-w-0">
                               <div className="text-xs font-semibold truncate">{art.title}</div>
                               <div className="text-[9px] text-text-sub uppercase font-bold mt-0.5">
-                                {art.isPaused ? '已暂停' : 
-                                 art.status === 'pending' ? '待排队' : 
-                                 art.status === 'researching' ? '调研中...' :
-                                 art.status === 'awaiting_research_approval' ? '待审核情报' :
-                                 art.status === 'outlining' ? '搭建大纲中...' :
-                                 art.status === 'awaiting_outline_approval' ? '待审核大纲' :
-                                 art.status === 'writing' ? '章节生成中' :
-                                 art.status === 'polishing' ? 'SEO润色中' :
-                                 art.status === 'completed' ? '已完成' : 
-                                 art.status === 'awaiting_approval' ? '待确认大纲' :
-                                 art.status === 'error' ? '出现错误' : art.status}
+                                {art.isPaused ? '已暂停' :
+                                  art.status === 'pending' ? '待排队' :
+                                    art.status === 'researching' ? '调研中...' :
+                                      art.status === 'awaiting_research_approval' ? '待审核情报' :
+                                        art.status === 'outlining' ? '搭建大纲中...' :
+                                          art.status === 'awaiting_outline_approval' ? '待审核大纲' :
+                                            art.status === 'writing' ? '章节生成中' :
+                                              art.status === 'polishing' ? 'SEO润色中' :
+                                                art.status === 'completed' ? '已完成' :
+                                                  art.status === 'awaiting_approval' ? '待确认大纲' :
+                                                    art.status === 'error' ? '出现错误' : art.status}
                               </div>
                             </div>
-                            
+
                             {/* Management Buttons */}
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               {/* Completed Tasks: Copy, Download, Restart */}
                               {art.status === 'completed' && (
                                 <>
-                                  <button 
-                                    onClick={(e) => { 
-                                      e.stopPropagation(); 
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       navigator.clipboard.writeText(art.finalContent);
-                                    }} 
-                                    className="p-1 hover:bg-primary/10 rounded text-primary" 
+                                    }}
+                                    className="p-1 hover:bg-primary/10 rounded text-primary"
                                     title="复制内容"
                                   >
                                     <Copy className="w-3 h-3" />
                                   </button>
-                                  <button 
-                                    onClick={(e) => { 
-                                      e.stopPropagation(); 
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       const blob = new Blob([art.finalContent], { type: 'text/markdown' });
                                       const url = URL.createObjectURL(blob);
                                       const a = document.createElement('a');
@@ -753,22 +808,22 @@ export default function App() {
                                       a.download = `${art.title.replace(/\s+/g, '_')}.md`;
                                       a.click();
                                       URL.revokeObjectURL(url);
-                                    }} 
-                                    className="p-1 hover:bg-primary/10 rounded text-primary" 
+                                    }}
+                                    className="p-1 hover:bg-primary/10 rounded text-primary"
                                     title="下载文件"
                                   >
                                     <Download className="w-3 h-3" />
                                   </button>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); handleRegenerateArticle(art.id); }} 
-                                    className="p-1 hover:bg-amber-50 rounded text-amber-500" 
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleRegenerateArticle(art.id); }}
+                                    className="p-1 hover:bg-amber-50 rounded text-amber-500"
                                     title="重新开始任务"
                                   >
                                     <RefreshCw className="w-3 h-3" />
                                   </button>
                                 </>
                               )}
-                              
+
                               {/* Error Tasks: Restart */}
                               {art.status === 'error' && (
                                 <button onClick={(e) => { e.stopPropagation(); handleRegenerateArticle(art.id); }} className="p-1 hover:bg-amber-50 rounded text-amber-500" title="重新开始任务">
@@ -789,7 +844,7 @@ export default function App() {
                                   <Zap className="w-3 h-3" />
                                 </button>
                               )}
-                              
+
                               {/* Always Show: Delete */}
                               <button onClick={(e) => { e.stopPropagation(); handleDeleteArticle(art.id); }} className="p-1 hover:bg-red-50 rounded text-red-500" title="删除任务">
                                 <Trash2 className="w-3 h-3" />
@@ -798,29 +853,28 @@ export default function App() {
                           </div>
 
                           {/* 流程进度条 (Progress Bar) */}
-                        <div className="space-y-1">
-                          <div className="flex gap-0.5 h-1 w-full">
-                            {stages.map((stage, idx) => (
-                              <div 
-                                key={stage}
-                                className={`flex-1 rounded-full transition-all duration-500 ${
-                                  idx < currentProgress 
-                                    ? (art.status === 'completed' ? 'bg-green-500' : 'bg-primary shadow-[0_0_8px_rgba(37,99,235,0.4)]') 
+                          <div className="space-y-1">
+                            <div className="flex gap-0.5 h-1 w-full">
+                              {stages.map((stage, idx) => (
+                                <div
+                                  key={stage}
+                                  className={`flex-1 rounded-full transition-all duration-500 ${idx < currentProgress
+                                    ? (art.status === 'completed' ? 'bg-green-500' : 'bg-primary shadow-[0_0_8px_rgba(37,99,235,0.4)]')
                                     : 'bg-gray-200'
-                                }`}
-                                title={stage}
-                              />
-                            ))}
-                          </div>
-                          <div className="flex justify-between text-[6px] text-text-sub font-mono uppercase tracking-tighter opacity-50">
-                            <span>{stages[0]}</span>
-                            <span>{stages[stages.length - 1]}</span>
+                                    }`}
+                                  title={stage}
+                                />
+                              ))}
+                            </div>
+                            <div className="flex justify-between text-[6px] text-text-sub font-mono uppercase tracking-tighter opacity-50">
+                              <span>{stages[0]}</span>
+                              <span>{stages[stages.length - 1]}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -832,7 +886,7 @@ export default function App() {
           <div className="panel-header flex justify-between items-center">
             <span>{state.mode === 'Brain' ? '规划蓝图 (Planning Blueprint)' : '产线监视器 (Production Monitor)'}</span>
             {state.mode === 'Brain' && state.expandedTerms.length > 0 && (
-              <button 
+              <button
                 onClick={downloadCSV}
                 className="flex items-center gap-1.5 px-3 py-1 bg-primary text-white rounded-lg text-[10px] font-bold hover:bg-primary-dark transition-all"
               >
@@ -861,11 +915,11 @@ export default function App() {
                       </thead>
                       <tbody className="divide-y divide-border">
                         {state.expandedTerms.map((term, i) => (
-                          <motion.tr 
+                          <motion.tr
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.05 }}
-                            key={i} 
+                            key={i}
                             className="bg-white hover:bg-gray-50"
                           >
                             <td className="px-4 py-3">
@@ -904,10 +958,9 @@ export default function App() {
                     {/* Header Controls */}
                     <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-border">
                       <div className="flex items-center gap-4">
-                        <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          selectedArticle.status === 'completed' ? 'bg-green-100 text-green-700' : 
+                        <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${selectedArticle.status === 'completed' ? 'bg-green-100 text-green-700' :
                           selectedArticle.status.includes('awaiting') ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
+                          }`}>
                           {selectedArticle.status}
                         </div>
                         {selectedArticle.isPaused && <span className="text-[10px] font-bold text-gray-400 uppercase">PAUSED</span>}
@@ -926,7 +979,7 @@ export default function App() {
 
                     {/* Error State View */}
                     {selectedArticle.status === 'error' && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="p-10 text-center space-y-6"
@@ -936,7 +989,7 @@ export default function App() {
                           <h3 className="text-lg font-bold text-text-main">生产线发生故障</h3>
                           <p className="text-xs text-text-sub max-w-xs mx-auto">多次尝试重连失败，可能由于 API 额度超限或网络不稳定。您可以尝试手动重启该任务。</p>
                         </div>
-                        <button 
+                        <button
                           onClick={() => handleRegenerateArticle(selectedArticle.id)}
                           className="px-6 py-2 bg-primary text-white rounded-lg font-bold text-xs hover:bg-primary-dark transition-all flex items-center gap-2 mx-auto"
                         >
@@ -947,7 +1000,7 @@ export default function App() {
 
                     {/* Intelligence Step (Middle) */}
                     {selectedArticle.status === 'awaiting_research_approval' && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="p-10 text-center space-y-6 bg-white border border-border rounded-2xl shadow-sm"
@@ -957,7 +1010,7 @@ export default function App() {
                           <h3 className="text-xl font-bold text-text-main">Step 1: 情报搜集完成</h3>
                           <p className="text-sm text-text-sub max-w-sm mx-auto">请在右侧 <span className="font-bold text-primary">情报面板</span> 审核 Top 竞研与全域增量信息。确认无误后点击下方按钮开始搭建大纲。</p>
                         </div>
-                        <button 
+                        <button
                           onClick={() => handleConfirmResearch(selectedArticle.id)}
                           className="btn-primary px-10 py-3 shadow-xl transition-transform hover:scale-105"
                         >
@@ -968,7 +1021,7 @@ export default function App() {
 
                     {/* Progress Detail (Middle) */}
                     {selectedArticle.status === 'awaiting_outline_approval' && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="p-6 bg-white border-2 border-primary rounded-2xl shadow-xl space-y-6"
@@ -978,7 +1031,7 @@ export default function App() {
                             <Layout className="w-6 h-6" />
                             <h3 className="text-lg font-bold">Step 2: 文章架构确认</h3>
                           </div>
-                          <button 
+                          <button
                             onClick={() => handleConfirmStructure(selectedArticle.id)}
                             className="btn-primary px-6 py-2 flex items-center gap-2"
                           >
@@ -1043,7 +1096,7 @@ export default function App() {
                             </div>
                           )}
                         </div>
-                        <button 
+                        <button
                           onClick={() => handleConfirmStructure(selectedArticle.id)}
                           className="w-full py-4 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-primary-dark transition-all transform hover:scale-[1.01]"
                         >
@@ -1056,13 +1109,12 @@ export default function App() {
                     {selectedArticle.status !== 'completed' && selectedArticle.status !== 'awaiting_approval' && (
                       <div className="space-y-4">
                         {selectedArticle.sections.map((section, idx) => (
-                          <motion.div 
+                          <motion.div
                             key={idx}
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className={`p-4 rounded-xl border transition-all ${
-                              section.isGenerating ? 'border-primary bg-blue-50/30' : 'border-border bg-white'
-                            }`}
+                            className={`p-4 rounded-xl border transition-all ${section.isGenerating ? 'border-primary bg-blue-50/30' : 'border-border bg-white'
+                              }`}
                           >
                             <div className="flex items-center justify-between mb-2">
                               <h4 className="font-bold text-xs flex items-center gap-2">
@@ -1114,8 +1166,8 @@ export default function App() {
                 <div className="p-4 bg-primary/5 rounded-xl border border-primary/10">
                   <h4 className="text-[10px] font-bold text-primary uppercase mb-2 flex items-center gap-1.5"><TableIcon className="w-3 h-3" /> 规划说明</h4>
                   <p className="text-xs text-text-sub leading-loose">
-                    1. 输入种子词后，AI 会模拟 Top 10 搜索结果进行意图聚类。<br/>
-                    2. 导出 CSV 后，请在飞书/Sheets 中人工修正 “目标关键词”。<br/>
+                    1. 输入种子词后，AI 会模拟 Top 10 搜索结果进行意图聚类。<br />
+                    2. 导出 CSV 后，请在飞书/Sheets 中人工修正 “目标关键词”。<br />
                     3. 确定最终列表后，切换到 Workflow B 开启批量挂机生产。
                   </p>
                 </div>
@@ -1125,7 +1177,7 @@ export default function App() {
                 <div className="space-y-6">
                   {/* Research Intelligence (Active for all Factory/Template steps once research is done) */}
                   {selectedArticle.competitiveResearch && (
-                    <motion.div 
+                    <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       className="space-y-6"
@@ -1171,24 +1223,24 @@ export default function App() {
                       </div>
 
                       <div className="p-4 bg-gray-50 border border-border rounded-xl space-y-3">
-                         <label className="text-[10px] uppercase font-bold text-text-sub flex items-center gap-2">
-                           <Zap className="w-3 h-3 text-primary" /> 增量信息点
-                         </label>
-                         <div className="space-y-1.5">
-                           {selectedArticle.competitiveResearch.keyFacts.map((f, i) => (
-                             <div key={i} className="text-[10px] flex gap-2 text-text-sub">
-                               <span className="text-accent-success font-bold shrink-0">✓</span>
-                               <span>{f}</span>
-                             </div>
-                           ))}
-                         </div>
+                        <label className="text-[10px] uppercase font-bold text-text-sub flex items-center gap-2">
+                          <Zap className="w-3 h-3 text-primary" /> 增量信息点
+                        </label>
+                        <div className="space-y-1.5">
+                          {selectedArticle.competitiveResearch.keyFacts.map((f, i) => (
+                            <div key={i} className="text-[10px] flex gap-2 text-text-sub">
+                              <span className="text-accent-success font-bold shrink-0">✓</span>
+                              <span>{f}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </motion.div>
                   )}
 
                   {/* Audit Scores (Visible when completed) */}
                   {selectedArticle.status === 'completed' && selectedArticle.audit && (
-                    <motion.div 
+                    <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="p-4 bg-gray-900 text-white rounded-2xl shadow-xl space-y-4 border border-white/10"
@@ -1315,10 +1367,10 @@ export default function App() {
                           <label className="block text-xs font-bold text-text-main uppercase tracking-wider">参考来源 (Top Sources)</label>
                           <div className="space-y-2">
                             {selectedArticle.competitiveResearch.sources.map((src, i) => (
-                              <a 
-                                key={i} 
-                                href={src.url} 
-                                target="_blank" 
+                              <a
+                                key={i}
+                                href={src.url}
+                                target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-2 p-2 bg-gray-50 rounded hover:bg-gray-100 transition-colors group"
                               >

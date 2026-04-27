@@ -1,5 +1,6 @@
 export type WorkflowMode = 'Brain' | 'Factory' | 'Template';
 export type GenerationStep = 'idle' | 'context' | 'expanding' | 'researching' | 'planning' | 'outlining' | 'writing' | 'polishing' | 'qa' | 'completed';
+export type AIProvider = 'Gemini' | 'OpenAI';
 
 export interface ArticleSection {
   title: string;
@@ -27,11 +28,11 @@ export interface Article {
   };
   contentType?: string;
   coreProposition?: string;
-  outline?: { 
-    title: string; 
+  outline?: {
+    title: string;
     h1?: string;
-    sections: { title: string; infoGain: string; subsections?: string[] }[]; 
-    lsi: string[]; 
+    sections: { title: string; infoGain: string; subsections?: string[] }[];
+    lsi: string[];
     anchorLinks: { keyword: string; url: string }[];
     faq?: { question: string; answer: string }[];
   };
@@ -42,7 +43,7 @@ export interface Article {
   h1?: string;
   faq?: { question: string; answer: string }[];
   tldr?: string;
-  internalLinks?: string[]; 
+  internalLinks?: string[];
   status: 'pending' | 'researching' | 'awaiting_research_approval' | 'outlining' | 'awaiting_outline_approval' | 'writing' | 'polishing' | 'qa' | 'completed' | 'error';
   isPaused?: boolean;
   qaPass?: boolean;
@@ -62,6 +63,8 @@ export interface GenerationState {
   audience: string;
   persona: string;
   coreValues: string;
+  provider: AIProvider;
+  model: string;
   articles: Article[];
   commonStructure: string;
   contentStandard: string;
